@@ -1,354 +1,92 @@
-from fastapi import FastAPI, WebSocket, Query, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
+from flask import Flask, request, jsonify
 import psycopg2
-import uuid
+import requests
 import os
-import uvicorn
 from dotenv import load_dotenv
-from pydantic import BaseModel
 import google.generativeai as genai
 
-# 🔹 Load environment variables
+# Load environment variables
 load_dotenv()
 
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Change to "*" to allow all
-    allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allow all headers
-)
-# 🔹 Configure Google Gemini AI
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+# Google Generative AI integration
+genai.configure(api_key='AIzaSyCn43FyMu0k4TpBrrXVo1KNRtPR1JuUoF4')
+# Database connection setup
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# 🔹 PostgreSQL Connection Details (Supabase)
-DB_CONFIG = {
-    "user": os.getenv("DB_USER"),
-    "password": os.getenv("DB_PASSWORD"),
-    "host": os.getenv("DB_HOST"),
-    "port": os.getenv("DB_PORT"),
-    "dbname": os.getenv("DB_NAME"),
-}
+# Initialize Flask app
+app = Flask(__name__)
 
-class UserRequest(BaseModel):
-    user_id: str
 
-# ✅ Connect to PostgreSQL
 def get_db_connection():
+    conn = psycopg2.connect(DATABASE_URL)
+    return conn
+
+def get_weather_conditions(latitude, longitude):
+    """Fetch real-time weather data for the location."""
     try:
-        return psycopg2.connect(**DB_CONFIG)
-    except psycopg2.Error as e:
-        print(f"❌ Database connection failed: {e}")
-        return None
-
-# ✅ Create necessary tables
-def create_tables():
-    conn = get_db_connection()
-    if conn is None:
-        return
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE EXTENSION IF NOT EXISTS "uuid-ossp";  -- ✅ Ensure UUID functions exist
-
-                CREATE TABLE IF NOT EXISTS users (
-                    user_id UUID PRIMARY KEY  -- ✅ Ensure user_id is unique
-                );
-
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),  -- ✅ Use uuid_generate_v4()
-                    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-                    created_at TIMESTAMP DEFAULT NOW()
-                );
-
-                CREATE TABLE IF NOT EXISTS messages (
-                    id SERIAL PRIMARY KEY,
-                    session_id UUID NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-                    message TEXT NOT NULL,
-                    role VARCHAR(10) CHECK (role IN ('user', 'bot')),
-                    timestamp TIMESTAMP DEFAULT NOW()
-                );
-
-                CREATE TABLE IF NOT EXISTS orders (
-                    order_id TEXT PRIMARY KEY,
-                    tracking_number TEXT,
-                    carrier TEXT,
-                    delivery_status TEXT,
-                    estimated_delivery TEXT,
-                    last_location TEXT
-                );
-            """)
-            conn.commit()
-            print("✅ Database tables are ready.")
+        url = f"{WEATHER_API_URL}?key={WEATHER_API_KEY}&q={latitude},{longitude}"
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        return {
+            "temperature": data["current"]["temp_c"],
+            "condition": data["current"]["condition"]["text"],
+            "wind_speed": data["current"]["wind_kph"],
+            "humidity": data["current"]["humidity"],
+            "precipitation": data["current"].get("precip_mm", 0)
+        }
     except Exception as e:
-        print(f"❌ Error creating tables: {e}")
-    finally:
+        print(f"Error fetching weather data: {e}")
+        return Noneone
+
+def get_meal_suggestions_from_genai(user_data, weather_data):
+    """Get meal suggestions from Google Generative AI using generateContent."""
+    try:
+        prompt = f"I am feeling {user_data['mood']}, and I live in {user_data['location']}. The current weather is {weather_data['condition']} with a temperature of {weather_data['temperature']}°C, wind speed of {weather_data['wind_speed']} kph, and humidity of {weather_data['humidity']}%. My health goals are {user_data['health_goals']} and I have the following dietary restrictions: {user_data['dietary_restrictions']}."
+
+        response = genai.generateContent(
+            model="models/text-bison-001",  # Specify model
+            prompt=prompt,
+            temperature=0.7
+        )
+
+        return response['candidates'][0]['content'] if 'candidates' in response else "Sorry, I couldn't suggest a meal at the moment."
+    
+    except Exception as e:
+        return f"Error fetching meal suggestion: {str(e)}"
+
+@app.route('/get-meal', methods=['POST'])
+def get_meal():
+    """API endpoint to get meal suggestion based on user mood, location, and weather."""
+    user_data = request.get_json()
+    mood = user_data.get("mood")
+    location = user_data.get("location")
+    health_goals = user_data.get("health_goals")
+    dietary_restrictions = user_data.get("dietary_restrictions")
+    latitude = user_data.get("latitude")
+    longitude = user_data.get("longitude")
+
+    # Get current weather for the location
+    weather_data = get_weather_conditions(latitude, longitude)
+
+    if weather_data:
+        # Generate meal suggestion based on weather data and user info
+        meal = get_meal_suggestions_from_genai(user_data, weather_data)
+        
+        # Store user data and meal suggestion in the database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("INSERT INTO users (mood, location, last_meal_suggestion) VALUES (%s, %s, %s)", 
+                       (mood, location, meal))
+        conn.commit()
+
+        cursor.close()
         conn.close()
 
-@app.post("/new_chat")
-async def new_chat(user: UserRequest):
-    conn = get_db_connection()
-    if conn is None:
-        return {"status": "error"}
-
-    try:
-        with conn.cursor() as cur:
-            # Insert user if not exists
-            cur.execute("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING;", (user.user_id,))
-            # Insert session and get the session ID
-            cur.execute("INSERT INTO sessions (user_id) VALUES (%s) RETURNING session_id;", (user.user_id,))
-            session_id = cur.fetchone()[0]
-            conn.commit()
-        return {"status": "success", "session_id": session_id}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-    finally:
-        conn.close()
-
-# ✅ Get Order Details
-def get_shipment(order_id):
-    conn = get_db_connection()
-    if conn is None:
-        return None
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM orders WHERE order_id = %s;", (order_id,))
-            order = cur.fetchone()
-            if order:
-                return {
-                    "order_id": order[0],
-                    "tracking_number": order[1],
-                    "carrier": order[2],
-                    "delivery_status": order[3],
-                    "estimated_delivery": order[4],
-                    "last_location": order[5],
-                }
-    except Exception as e:
-        print(f"❌ Error retrieving order: {e}")
-    finally:
-        conn.close()
-
-    return None
-
-# ✅ Get Chat Messages
-def get_conversation(session_id):
-    conn = get_db_connection()
-    if conn is None:
-        return [], None  # Return empty list and no order ID
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT message, role FROM messages WHERE session_id = %s ORDER BY timestamp;", (session_id,))
-            result = cur.fetchall()
-            
-            conversation = [(msg[0], msg[1]) for msg in result] if result else []
-
-            # 🔹 Extract last mentioned order ID from conversation
-            last_order_id = None
-            for msg, role in reversed(conversation):
-                if msg.isdigit():  # Assuming order IDs are numeric
-                    last_order_id = msg
-                    break
-            
-            return conversation, last_order_id
-    except Exception as e:
-        print(f"❌ Error retrieving messages: {e}")
-        return [], None
-    finally:
-        conn.close()
-
-
-# ✅ Save Chat Messages
-def save_conversation(session_id, user_message, bot_message):
-    conn = get_db_connection()
-    if conn is None:
-        return
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("INSERT INTO messages (session_id, message, role) VALUES (%s, %s, 'user');", (session_id, user_message))
-            cur.execute("INSERT INTO messages (session_id, message, role) VALUES (%s, %s, 'bot');", (session_id, bot_message))
-            conn.commit()
-    except Exception as e:
-        print(f"❌ Error saving messages: {e}")
-    finally:
-        conn.close()
-
-# ✅ Generate AI Response
-# def generate_response(session_id, user_query, language="en", order_data=None):
-#     conversation_history = get_conversation(session_id)
-
-#     # 🟢 Add shipment tracking details if available
-#     if order_data:
-#         context = f"""
-#         📦 **Order Details:**
-#         - **Order ID:** {order_data['order_id']}
-#         - **Tracking Number:** {order_data['tracking_number']}
-#         - **Carrier:** {order_data['carrier']}
-#         - **Delivery Status:** {order_data['delivery_status']}
-#         - **Estimated Arrival:** {order_data['estimated_delivery']}
-#         - **Last Known Location:** {order_data['last_location']}
-
-#         Let me know if you need further details or assistance! 😊
-#         """
-#     else:
-#         context = "Hmm, I couldn't find any details for that order. Double-check the tracking number and try again! 🚀"
-
-#     # 🔹 Generate the conversational prompt
-#     if language == "ta":
-#         prompt = f"""
-#         நீங்கள் ஒரு *உணர்வு மிகுந்த AI லாஜிஸ்டிக்ஸ் உதவியாளர்*.
-#         பின்வரும் உரையாடலைப் பயன்படுத்தி பயனர் கேள்விக்கு தமிழில் பதிலளிக்கவும்.
-
-#         உரையாடல் வரலாறு:
-#         {conversation_history}
-
-#         பயனர்: "{user_query}"
-
-#         உரையாடல் சூழல்:
-#         {context}
-#         """
-#     else:
-#         prompt = f"""
-#         You are a *friendly and helpful AI logistics assistant*. Keep responses **engaging, clear, and natural**.
-
-#         ### **Conversation History**
-#         {conversation_history}
-
-#         ### **User Query**
-#         "{user_query}"
-
-#         ### **Context**
-#         {context}
-
-#         Respond in a **professional yet friendly** tone. Use simple, helpful language, and add a friendly touch where appropriate. 😊
-#         """
-
-#     # 🔥 Generate AI response
-#     response = genai.GenerativeModel("gemini-1.5-flash").generate_content(prompt)
-
-#     # 🟢 Store conversation in PostgreSQL
-#     save_conversation(session_id, user_query, response.text)
-
-#     return response.text
-
-def generate_response(session_id, user_query, language="en", order_data=None):
-    conversation_history, last_order_id = get_conversation(session_id)
-
-    # 🟢 Retrieve previous order details if available
-    if not order_data and last_order_id:
-        order_data = get_shipment(last_order_id)
-
-    # 🟢 Add shipment tracking details if available
-    if order_data:
-        context = f"""
-        📦 **Order Details:**
-        - **Order ID:** {order_data['order_id']}
-        - **Tracking Number:** {order_data['tracking_number']}
-        - **Carrier:** {order_data['carrier']}
-        - **Delivery Status:** {order_data['delivery_status']}
-        - **Estimated Arrival:** {order_data['estimated_delivery']}
-        - **Last Known Location:** {order_data['last_location']}
-
-        Let me know if you need further details or assistance! 😊
-        """
+        return jsonify({"meal": meal})
     else:
-        context = "Hmm, I couldn't find any details for that order. Double-check the tracking number and try again! 🚀"
+        return jsonify({"error": "Unable to fetch weather data"}), 500
 
-    # 🔹 Format conversation history
-    formatted_history = "\n".join(
-        [f"{role.capitalize()}: {msg}" for msg, role in conversation_history]
-    )
-
-    # 🔹 Generate the conversational prompt with full context
-    if language == "ta":
-        prompt = f"""
-        நீங்கள் ஒரு *உணர்வு மிகுந்த AI லாஜிஸ்டிக்ஸ் உதவியாளர்*.
-        பின்வரும் உரையாடலைப் பயன்படுத்தி பயனர் கேள்விக்கு தமிழில் பதிலளிக்கவும்.
-
-        **முந்தைய உரையாடல்**:
-        {formatted_history}
-
-        **பயனர்**: "{user_query}"
-
-        **சூழல் தகவல்**:
-        {context}
-
-        உரையாடல் தொடர்ச்சியாக இருக்க வேண்டும். கேள்விக்கு தெளிவான பதில் வழங்கவும்.
-        """
-    else:
-        prompt = f"""
-        You’re not a chatbot. You’re **a real person** having a conversation.      
-        Hey! You're a smart, friendly AI logistics assistant. Keep it **natural, clear, and to the point**—like a quick, helpful chat.  
-        
-        ### **Chat History**  
-        {formatted_history}  
-        
-        ### **User's Message**  
-        "{user_query}"  
-        
-        ### **Context**  
-        {context}  
-        
-        Keep it flowing—**engaging, simple, and human**. No robotic talk, just **real help, fast**.  
-        """   
-
-
-    # 🔥 Generate AI response
-    response = genai.GenerativeModel("gemini-1.5-flash").generate_content(prompt)
-
-    # 🟢 Store conversation in PostgreSQL
-    save_conversation(session_id, user_query, response.text)
-
-    return response.text
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-
-    while True:
-        try:
-            data = await websocket.receive_json()
-            session_id = data.get("session_id")
-            user_message = data.get("message", "").strip()
-            language = data.get("language", "en")
-
-            if not user_message: 
-                continue  
-
-            if not session_id:
-                session_id = str(uuid.uuid4())
-
-            conversation_history, last_order_id = get_conversation(session_id)
-
-            # 🔹 Detect if user is referring to a previous order
-            order_data = None
-            if user_message.isdigit():
-                order_data = get_shipment(user_message)
-            elif last_order_id:
-                order_data = get_shipment(last_order_id)
-
-            # 🔹 Generate response with context
-            ai_response = generate_response(session_id, user_message, language, order_data)
-
-            # Send the AI response back to the client
-            await websocket.send_json({"response": ai_response})
-
-        except WebSocketDisconnect:
-            print("❌ WebSocket Disconnected")
-            break  # Exit the loop on disconnect
-
-        except Exception as e:
-            print(f"❌ WebSocket Error: {e}")
-
-# ✅ API Root Endpoint
-@app.get("/")
-def read_root():
-    return {"message": "🚀 FastAPI AI Logistics Assistant is running!"}
-
-# ✅ Start the server
 if __name__ == "__main__":
-    create_tables()
-    uvicorn.run("alto:app", host="127.0.0.1", port=8000, reload=True)
+    app.run(debug=True)
