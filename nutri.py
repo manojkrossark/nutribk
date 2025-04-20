@@ -15,8 +15,8 @@ load_dotenv()
 genai.configure(api_key='AIzaSyCn43FyMu0k4TpBrrXVo1KNRtPR1JuUoF4')
 
 # OpenWeatherMap API setup
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
-WEATHER_API_URL = "https://api.weatherapi.com/v1/current.json"
+WEATHER_API_KEY = "6419738e339e4507aa8122732240910"
+WEATHER_API_URL = "http://api.weatherapi.com/v1/current.json"
 
 # Database connection setup
 DATABASE_URL = os.getenv("DATABASE_URL")
