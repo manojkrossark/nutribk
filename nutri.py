@@ -19,7 +19,7 @@ WEATHER_API_KEY = "6419738e339e4507aa8122732240910"
 WEATHER_API_URL = "http://api.weatherapi.com/v1/current.json"
 
 # Database connection setup
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = "postgresql://postgres.qzudlrfcsaagrxvugzot:m6vuWFRSoHj2EHZe@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
 
 # Initialize FastAPI app
 app = FastAPI()
