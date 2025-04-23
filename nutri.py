@@ -9,16 +9,14 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 import uvicorn
 
-# Load environment variables
-load_dotenv()
-
 app = FastAPI()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change to "*" to allow all
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Google Generative AI integration
@@ -30,10 +28,6 @@ WEATHER_API_URL = "http://api.weatherapi.com/v1/current.json"
 
 # Database connection setup
 DATABASE_URL = "postgresql://postgres.qzudlrfcsaagrxvugzot:m6vuWFRSoHj2EHZe@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
-
-# Initialize FastAPI app
-app = FastAPI()
-
 
 class UserData(BaseModel):
     mood: str
@@ -69,20 +63,32 @@ def get_weather_conditions(latitude: float, longitude: float):
 
 
 def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
-    """Get meal suggestions from Google Generative AI using generateContent."""
+    """Get meal suggestions from Google Generative AI using Gemini 1.5 Flash."""
     try:
-        prompt = f"I am feeling {user_data['mood']}, and I live in {user_data['location']}. The current weather is {weather_data['condition']} with a temperature of {weather_data['temperature']}°C, wind speed of {weather_data['wind_speed']} kph, and humidity of {weather_data['humidity']}%. My health goals are {user_data['health_goals']} and I have the following dietary restrictions: {user_data['dietary_restrictions']}."
-
-        response = genai.generateContent(
-            model="models/text-bison-001",  # Specify model
-            prompt=prompt,
-            temperature=0.7
+        prompt = (
+            f"I am feeling {user_data['mood']}, and I live in {user_data['location']}. "
+            f"The current weather in {user_data['location']} is {weather_data['condition']} with a temperature of "
+            f"{weather_data['temperature']}°C, wind speed of {weather_data['wind_speed']} kph, and humidity of "
+            f"{weather_data['humidity']}%. "
+            f"My health goals are {user_data['health_goals']} and I follow a {user_data['dietary_restrictions']} diet. "
+            f"Please provide a personalized 3-day meal plan tailored to my location in {user_data['location']}, supporting "
+            f"my health goals and dietary restrictions. The meals should consider the current weather, be nutritious, and "
+            f"reflect local tastes. Each day should include 3 meals (Breakfast, Lunch, and Dinner), with a focus on weight loss, "
+            f"using locally sourced ingredients where possible. Ensure the meals are easy to prepare, satisfying, and aligned with "
+            f"my health goals of {user_data['health_goals']}. Return the response in a JSON format."
         )
 
-        return response['candidates'][0]['content'] if 'candidates' in response else "Sorry, I couldn't suggest a meal at the moment."
-    
+        # Load the Gemini 1.5 Flash model
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+
+        # Generate content
+        response = model.generate_content(prompt)
+
+        return response.text if response and response.text else "Sorry, I couldn't suggest a meal at the moment."
+
     except Exception as e:
         return f"Error fetching meal suggestion: {str(e)}"
+
 
 
 @app.post("/get-meal")
@@ -96,20 +102,20 @@ async def get_meal(user_data: UserData):
 
     if weather_data:
         # Generate meal suggestion based on weather data and user info
-        meal = get_meal_suggestions_from_genai(user_data.dict(), weather_data)
+        meal = get_meal_suggestions_from_genai(user_data.model_dump(), weather_data)
         
         # Store user data and meal suggestion in the database
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        # conn = get_db_connection()
+        # cursor = conn.cursor()
 
-        cursor.execute(
-            "INSERT INTO users (mood, location, last_meal_suggestion) VALUES (%s, %s, %s)",
-            (user_data.mood, user_data.location, meal),
-        )
-        conn.commit()
+        # cursor.execute(
+        #     "INSERT INTO users (mood, location, last_meal_suggestion) VALUES (%s, %s, %s)",
+        #     (user_data.mood, user_data.location, meal),
+        # )
+        # conn.commit()
 
-        cursor.close()
-        conn.close()
+        # cursor.close()
+        # conn.close()
 
         return {"meal": meal}
     else:
