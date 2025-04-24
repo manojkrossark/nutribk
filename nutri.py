@@ -36,6 +36,7 @@ class UserData(BaseModel):
     dietary_restrictions: str
     latitude: float
     longitude: float
+    budget:str
 
 
 def get_db_connection():
@@ -61,39 +62,79 @@ def get_weather_conditions(latitude: float, longitude: float):
         print(f"Error fetching weather data: {e}")
         return None
 
-
 def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
-    """Get meal suggestions from Google Generative AI using Gemini 1.5 Flash."""
+    """Get meal suggestions from Google Generative AI using Gemini 1.5 Flash, formatted for frontend."""
+
     try:
+        # Updated prompt to match the frontend structure
         prompt = (
             f"I am feeling {user_data['mood']}, and I live in {user_data['location']}. "
             f"The current weather in {user_data['location']} is {weather_data['condition']} with a temperature of "
             f"{weather_data['temperature']}°C, wind speed of {weather_data['wind_speed']} kph, and humidity of "
             f"{weather_data['humidity']}%. "
             f"My health goals are {user_data['health_goals']} and I follow a {user_data['dietary_restrictions']} diet. "
+            f"My budget for meals is {user_data['budget']}. "
             f"Please provide a personalized 3-day meal plan tailored to my location in {user_data['location']}, supporting "
             f"my health goals and dietary restrictions. The meals should consider the current weather, be nutritious, and "
-            f"reflect local tastes. Each day should include 3 meals (Breakfast, Lunch, and Dinner), with a focus on weight loss, "
-            f"using locally sourced ingredients where possible. Ensure the meals are easy to prepare, satisfying, and aligned with "
-            f"my health goals of {user_data['health_goals']}. Return the response in a JSON format."
+            f"reflect local tastes. Each day should include 3 meals (Breakfast, Lunch, and Dinner), using locally sourced ingredients where possible. "
+            f"Each meal should list the food items in a bullet point format, and include a short note about the meal. "
+            f"Ensure the meals are easy to prepare, satisfying, and aligned with "
+            f"my health goals of {user_data['health_goals']} and my budget of {user_data['budget']}. "
+            f"Format the response strictly as a JSON object using this structure: "
+            f"{{"
+            f"  'mealPlan': {{"
+            f"    'location': 'string',"
+            f"    'weather': 'string',"
+            f"    'healthGoals': 'string',"
+            f"    'diet': 'string',"
+            f"    'budget': 'string',"
+            f"    'description': 'string',"
+            f"    'days': ["
+            f"      {{"
+            f"        'day': 'string',"
+            f"        'meals': ["
+            f"          {{"
+            f"            'meal': 'string',"
+            f"            'items': ['string', 'string'],"
+            f"            'notes': 'string'"
+            f"          }},"
+            f"          {{"
+            f"            'meal': 'string',"
+            f"            'items': ['string', 'string'],"
+            f"            'notes': 'string'"
+            f"          }},"
+            f"          {{"
+            f"            'meal': 'string',"
+            f"            'items': ['string', 'string'],"
+            f"            'notes': 'string'"
+            f"          }}"
+            f"        ]"
+            f"      }},"
+            f"      {{...}},"
+            f"      {{...}}"
+            f"    ]"
+            f"  }}"
+            f"}}"
+            f"Return only the JSON without markdown formatting or extra explanation."
         )
 
-        # Load the Gemini 1.5 Flash model
+        # Load the Gemini model
         model = genai.GenerativeModel(model_name="gemini-1.5-flash")
-
-        # Generate content
         response = model.generate_content(prompt)
 
-        return response.text if response and response.text else "Sorry, I couldn't suggest a meal at the moment."
+        if response and response.text:
+            # Clean up markdown code block artifacts, if any
+            cleaned_text = response.text.strip().replace("```json", "").replace("```", "").strip()
+            return cleaned_text
+        else:
+            return "Sorry, I couldn't suggest a meal at the moment."
 
     except Exception as e:
         return f"Error fetching meal suggestion: {str(e)}"
 
-
-
 @app.post("/get-meal")
 async def get_meal(user_data: UserData):
-    """API endpoint to get meal suggestion based on user mood, location, and weather."""
+    """API endpoint to get meal suggestion based on user mood, location, weather, and budget."""
     latitude = user_data.latitude
     longitude = user_data.longitude
 
@@ -101,10 +142,10 @@ async def get_meal(user_data: UserData):
     weather_data = get_weather_conditions(latitude, longitude)
 
     if weather_data:
-        # Generate meal suggestion based on weather data and user info
+        # Generate meal suggestion based on weather data and user info, including budget
         meal = get_meal_suggestions_from_genai(user_data.model_dump(), weather_data)
         
-        # Store user data and meal suggestion in the database
+        # Store user data and meal suggestion in the database (if needed)
         # conn = get_db_connection()
         # cursor = conn.cursor()
 
@@ -117,10 +158,18 @@ async def get_meal(user_data: UserData):
         # cursor.close()
         # conn.close()
 
-        return {"meal": meal}
+        return {
+            "meal": meal,
+            "weather": {
+                "temperature": weather_data["temperature"],
+                "condition": weather_data["condition"],
+                "wind_speed": weather_data["wind_speed"],
+                "humidity": weather_data["humidity"],
+                "precipitation": weather_data["precipitation"]
+            }
+        }
     else:
         raise HTTPException(status_code=500, detail="Unable to fetch weather data")
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
