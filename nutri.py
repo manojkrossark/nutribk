@@ -36,7 +36,8 @@ class UserData(BaseModel):
     dietary_restrictions: str
     latitude: float
     longitude: float
-    budget:str
+    budget: str
+    notes: str = ""   # <-- Added notes, default empty
 
 
 def get_db_connection():
@@ -66,7 +67,7 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
     """Get meal suggestions from Google Generative AI using Gemini 1.5 Flash, formatted for frontend."""
 
     try:
-        # Updated prompt to match the frontend structure
+        # Build the base prompt
         prompt = (
             f"I am feeling {user_data['mood']}, and I live in {user_data['location']}. "
             f"The current weather in {user_data['location']} is {weather_data['condition']} with a temperature of "
@@ -74,6 +75,14 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
             f"{weather_data['humidity']}%. "
             f"My health goals are {user_data['health_goals']} and I follow a {user_data['dietary_restrictions']} diet. "
             f"My budget for meals is {user_data['budget']}. "
+        )
+
+        # Add user notes if provided
+        if user_data.get('notes'):
+            prompt += f"Additional notes from me: {user_data['notes']}. "
+
+        # Continue prompt
+        prompt += (
             f"Please provide a personalized 3-day meal plan tailored to my location in {user_data['location']}, supporting "
             f"my health goals and dietary restrictions. The meals should consider the current weather, be nutritious, and "
             f"reflect local tastes. Each day should include 3 meals (Breakfast, Lunch, and Dinner), using locally sourced ingredients where possible. "
@@ -98,19 +107,10 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
             f"            'items': ['string', 'string'],"
             f"            'notes': 'string'"
             f"          }},"
-            f"          {{"
-            f"            'meal': 'string',"
-            f"            'items': ['string', 'string'],"
-            f"            'notes': 'string'"
-            f"          }},"
-            f"          {{"
-            f"            'meal': 'string',"
-            f"            'items': ['string', 'string'],"
-            f"            'notes': 'string'"
-            f"          }}"
+            f"          {{...}},"
+            f"          {{...}}"
             f"        ]"
             f"      }},"
-            f"      {{...}},"
             f"      {{...}}"
             f"    ]"
             f"  }}"
@@ -118,12 +118,10 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
             f"Return only the JSON without markdown formatting or extra explanation."
         )
 
-        # Load the Gemini model
         model = genai.GenerativeModel(model_name="gemini-1.5-flash")
         response = model.generate_content(prompt)
 
         if response and response.text:
-            # Clean up markdown code block artifacts, if any
             cleaned_text = response.text.strip().replace("```json", "").replace("```", "").strip()
             return cleaned_text
         else:
