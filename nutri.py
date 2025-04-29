@@ -5,6 +5,7 @@ from typing import Optional
 import psycopg2
 import requests
 import os
+import json
 from dotenv import load_dotenv
 import google.generativeai as genai
 import uvicorn
@@ -22,11 +23,11 @@ app.add_middleware(
 # Google Generative AI integration
 genai.configure(api_key='AIzaSyCn43FyMu0k4TpBrrXVo1KNRtPR1JuUoF4')
 
-# OpenWeatherMap API setup
+# Weather API
 WEATHER_API_KEY = "6419738e339e4507aa8122732240910"
 WEATHER_API_URL = "http://api.weatherapi.com/v1/current.json"
 
-# Database connection setup
+# PostgreSQL connection
 DATABASE_URL = "postgresql://postgres.qzudlrfcsaagrxvugzot:m6vuWFRSoHj2EHZe@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
 
 class UserData(BaseModel):
@@ -37,16 +38,14 @@ class UserData(BaseModel):
     latitude: float
     longitude: float
     budget: str
-    notes: str = ""   # <-- Added notes, default empty
-
+    notes: str = ""
+    language: Optional[str] = "english"
 
 def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL)
     return conn
 
-
 def get_weather_conditions(latitude: float, longitude: float):
-    """Fetch real-time weather data for the location."""
     try:
         url = f"{WEATHER_API_URL}?key={WEATHER_API_KEY}&q={latitude},{longitude}"
         response = requests.get(url)
@@ -64,21 +63,17 @@ def get_weather_conditions(latitude: float, longitude: float):
         return None
 
 def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
-    """Get meal suggestions from Google Generative AI using Gemini 1.5 Flash, formatted for frontend and localized by language."""
-
     try:
-        # Language mapping to prompt-friendly names
         language = user_data.get("language", "english").lower()
         language_map = {
             "tamil": "Tamil",
             "telugu": "Telugu",
             "malayalam": "Malayalam",
-            "kanadam": "Kannada",
+            "kannada": "Kannada",
             "english": "English"
         }
         target_language = language_map.get(language, "English")
 
-        # Base prompt (in English)
         prompt = (
             f"I am feeling {user_data['mood']}, and I live in {user_data['location']}. "
             f"The current weather in {user_data['location']} is {weather_data['condition']} with a temperature of "
@@ -123,58 +118,36 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
             f"Return only the JSON without markdown formatting or extra explanation."
         )
 
-        # Language note to Gemini
         if target_language != "English":
             prompt += f" Translate the entire response (values only) to {target_language}. Keep field keys in English."
 
-        # Send prompt
         model = genai.GenerativeModel(model_name="gemini-1.5-flash")
         response = model.generate_content(prompt)
 
         if response and response.text:
-            cleaned_text = response.text.strip().replace("json", "").replace("", "").strip()
-            return cleaned_text
+            cleaned_text = response.text.strip()
+            # Attempt to extract JSON by identifying first/last braces
+            start = cleaned_text.find('{')
+            end = cleaned_text.rfind('}') + 1
+            json_part = cleaned_text[start:end]
+            parsed_json = json.loads(json_part)
+            return parsed_json
         else:
-            return "Sorry, I couldn't suggest a meal at the moment."
+            raise ValueError("Empty response from Gemini")
 
     except Exception as e:
-        return f"Error fetching meal suggestion: {str(e)}"
+        print(f"Meal suggestion error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching meal suggestion: {str(e)}")
 
 @app.post("/get-meal")
 async def get_meal(user_data: UserData):
-    """API endpoint to get meal suggestion based on user mood, location, weather, and budget."""
-    latitude = user_data.latitude
-    longitude = user_data.longitude
-
-    # Get current weather for the location
-    weather_data = get_weather_conditions(latitude, longitude)
+    weather_data = get_weather_conditions(user_data.latitude, user_data.longitude)
 
     if weather_data:
-        # Generate meal suggestion based on weather data and user info, including budget
-        meal = get_meal_suggestions_from_genai(user_data.model_dump(), weather_data)
-        
-        # Store user data and meal suggestion in the database (if needed)
-        # conn = get_db_connection()
-        # cursor = conn.cursor()
-
-        # cursor.execute(
-        #     "INSERT INTO users (mood, location, last_meal_suggestion) VALUES (%s, %s, %s)",
-        #     (user_data.mood, user_data.location, meal),
-        # )
-        # conn.commit()
-
-        # cursor.close()
-        # conn.close()
-
+        meal_json = get_meal_suggestions_from_genai(user_data.model_dump(), weather_data)
         return {
-            "meal": meal,
-            "weather": {
-                "temperature": weather_data["temperature"],
-                "condition": weather_data["condition"],
-                "wind_speed": weather_data["wind_speed"],
-                "humidity": weather_data["humidity"],
-                "precipitation": weather_data["precipitation"]
-            }
+            "meal": meal_json,
+            "weather": weather_data
         }
     else:
         raise HTTPException(status_code=500, detail="Unable to fetch weather data")
