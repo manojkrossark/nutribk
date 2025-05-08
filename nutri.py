@@ -27,6 +27,7 @@ genai.configure(api_key='AIzaSyCn43FyMu0k4TpBrrXVo1KNRtPR1JuUoF4')
 # OpenWeatherMap API setup
 WEATHER_API_KEY = "6419738e339e4507aa8122732240910"
 WEATHER_API_URL = "http://api.weatherapi.com/v1/current.json"
+PEXELS_API_KEY = "j0PIrrp6gOhv1UBHbZTTBSrDOekAdibiRI4ti6vrgLgYxZNTu2KZY60e"
 
 # Database connection setup
 DATABASE_URL = "postgresql://postgres.qzudlrfcsaagrxvugzot:m6vuWFRSoHj2EHZe@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
@@ -67,10 +68,20 @@ def get_weather_conditions(latitude: float, longitude: float):
         return None
 
 # def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
-#     """Get meal suggestions from Google Generative AI using Gemini 1.5 Flash, formatted for frontend."""
-
+#     """Get meal suggestions from Google Generative AI using Gemini 1.5 Flash, formatted for frontend and localized by language."""
 #     try:
-#         # Build the base prompt
+#         # Language mapping
+#         language = user_data.get("language", "english").lower()
+#         language_map = {
+#             "tamil": "Tamil",
+#             "telugu": "Telugu",
+#             "malayalam": "Malayalam",
+#             "kanadam": "Kannada",
+#             "english": "English"
+#         }
+#         target_language = language_map.get(language, "English")
+
+#         # Prompt construction
 #         prompt = (
 #             f"I am feeling {user_data['mood']}, and I live in {user_data['location']}. "
 #             f"The current weather in {user_data['location']} is {weather_data['condition']} with a temperature of "
@@ -80,60 +91,99 @@ def get_weather_conditions(latitude: float, longitude: float):
 #             f"My budget for meals is {user_data['budget']}. "
 #         )
 
-#         # Add user notes if provided
-#         if user_data.get('notes'):
+#         if user_data.get("notes"):
 #             prompt += f"Additional notes from me: {user_data['notes']}. "
 
-#         # Continue prompt
 #         prompt += (
-#             f"Please provide a personalized 5-day meal plan tailored to my location in {user_data['location']}, supporting "
-#             f"my health goals and dietary restrictions. The meals should consider the current weather, be nutritious, and "
-#             f"reflect local tastes. Each day should include 3 meals (Breakfast, Lunch, and Dinner), using locally sourced ingredients where possible. "
-#             f"Each meal should list the food items in a bullet point format, and include a short note about the meal. "
-#             f"Ensure the meals are easy to prepare, satisfying, and aligned with "
-#             f"my health goals of {user_data['health_goals']} and my budget of {user_data['budget']}. "
-#             f"Format the response strictly as a JSON object using this structure: "
-#             f"{{"
-#             f"  'mealPlan': {{"
-#             f"    'location': 'string',"
-#             f"    'weather': 'string',"
-#             f"    'healthGoals': 'string',"
-#             f"    'diet': 'string',"
-#             f"    'budget': 'string',"
-#             f"    'description': 'string',"
-#             f"    'days': ["
-#             f"      {{"
-#             f"        'day': 'string',"
-#             f"        'meals': ["
-#             f"          {{"
-#             f"            'meal': 'string',"
-#             f"            'items': ['string', 'string'],"
-#             f"            'notes': 'string'"
-#             f"          }},"
-#             f"          {{...}},"
-#             f"          {{...}}"
-#             f"        ]"
-#             f"      }},"
-#             f"      {{...}}"
-#             f"    ]"
-#             f"  }}"
-#             f"}}"
-#             f"Return only the JSON without markdown formatting or extra explanation."
+#             "Please provide a personalized 5-day meal plan tailored to my location, supporting my health goals and dietary restrictions. "
+#             "The meals should consider the current weather, be nutritious, and reflect local tastes. Each day should include 3 meals "
+#             "(Breakfast, Lunch, and Dinner), using locally sourced ingredients where possible. Each meal should list the food items "
+#             "in a bullet point format and include a short note. Ensure meals are easy to prepare and budget-friendly. "
+#             "Format the response strictly as a JSON object using this structure: "
+#             "{"
+#             "  'mealPlan': {"
+#             "    'location': 'string',"
+#             "    'weather': 'string',"
+#             "    'healthGoals': 'string',"
+#             "    'diet': 'string',"
+#             "    'budget': 'string',"
+#             "    'description': 'string',"
+#             "    'days': ["
+#             "      {"
+#             "        'day': 'string',"
+#             "        'meals': ["
+#             "          {"
+#             "            'meal': 'string',"
+#             "            'items': ['string'],"
+#             "            'notes': 'string'"
+#             "          }"
+#             "        ]"
+#             "      }"
+#             "    ]"
+#             "  }"
+#             "}. Return only the JSON without markdown formatting or extra explanation."
 #         )
 
-#         model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+#         if target_language != "English":
+#             prompt += f" Translate only the values to {target_language}, keeping field keys in English."
+
+#         # Generate content
+#         model = genai.GenerativeModel("gemini-1.5-flash")
 #         response = model.generate_content(prompt)
 
-#         if response and response.text:
-#             cleaned_text = response.text.strip().replace("```json", "").replace("```", "").strip()
-#             return cleaned_text
-#         else:
-#             return "Sorry, I couldn't suggest a meal at the moment."
+#         if not response or not response.text:
+#             return {"error": "Empty response from Gemini."}
+
+#         cleaned_text = response.text.strip()
+#         cleaned_text = cleaned_text.replace("```json", "").replace("```", "").strip()
+
+#         # SAFE JSON Extraction
+#         # Find the first "{" and last "}" to safely extract JSON
+#         start_idx = cleaned_text.find('{')
+#         end_idx = cleaned_text.rfind('}') + 1
+
+#         if start_idx == -1 or end_idx == -1:
+#             return {"error": "No JSON object found in Gemini response", "raw": cleaned_text}
+
+#         json_text = cleaned_text[start_idx:end_idx]
+
+#         try:
+#             parsed_json = json.loads(json_text)
+#             return parsed_json
+#         except json.JSONDecodeError as e:
+#             return {
+#                 "error": f"JSON decode failed: {str(e)}",
+#                 "raw": json_text
+#             }
 
 #     except Exception as e:
-#         return f"Error fetching meal suggestion: {str(e)}"
+#         return {"error": f"Unhandled exception: {str(e)}"}
+    
+def get_pexels_image_url(query: str, api_key: str) -> str:
+    headers = {
+        "Authorization": api_key
+    }
+    params = {
+        "query": f"{query} food meal dish",
+        "per_page": 5  # Get more results to choose a better one
+    }
+    response = requests.get("https://api.pexels.com/v1/search", headers=headers, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        photos = data.get("photos", [])
+        if photos:
+            # Prefer landscape orientation or images with wider aspect ratio
+            best_photo = sorted(
+                photos,
+                key=lambda p: p.get("width", 0) / max(p.get("height", 1), 1),
+                reverse=True
+            )[0]
+            return best_photo["src"]["large"]
+    return ""  # fallback
+
+
 def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
-    """Get meal suggestions from Google Generative AI using Gemini 1.5 Flash, formatted for frontend and localized by language."""
+    """Get meal suggestions from Google Generative AI using Gemini 1.5 Flash, with accurate food images from Pexels."""
     try:
         # Language mapping
         language = user_data.get("language", "english").lower()
@@ -146,7 +196,7 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
         }
         target_language = language_map.get(language, "English")
 
-        # Prompt construction
+        # Construct prompt
         prompt = (
             f"I am feeling {user_data['mood']}, and I live in {user_data['location']}. "
             f"The current weather in {user_data['location']} is {weather_data['condition']} with a temperature of "
@@ -162,8 +212,9 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
         prompt += (
             "Please provide a personalized 5-day meal plan tailored to my location, supporting my health goals and dietary restrictions. "
             "The meals should consider the current weather, be nutritious, and reflect local tastes. Each day should include 3 meals "
-            "(Breakfast, Lunch, and Dinner), using locally sourced ingredients where possible. Each meal should list the food items "
-            "in a bullet point format and include a short note. Ensure meals are easy to prepare and budget-friendly. "
+            "(Breakfast, Lunch, and Dinner), using locally sourced ingredients where possible. Each meal should list multiple food items. "
+            "Each item should include a 'name'. Do not include any imageUrl or external links. "
+            "Include a short 'notes' field per meal. Ensure meals are easy to prepare and budget-friendly. "
             "Format the response strictly as a JSON object using this structure: "
             "{"
             "  'mealPlan': {"
@@ -179,7 +230,7 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
             "        'meals': ["
             "          {"
             "            'meal': 'string',"
-            "            'items': ['string'],"
+            "            'items': [ { 'name': 'string' } ],"
             "            'notes': 'string'"
             "          }"
             "        ]"
@@ -190,7 +241,7 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
         )
 
         if target_language != "English":
-            prompt += f" Translate only the values to {target_language}, keeping field keys in English."
+            prompt += f" Translate only the values to {target_language}, keeping the field keys in English."
 
         # Generate content
         model = genai.GenerativeModel("gemini-1.5-flash")
@@ -202,8 +253,7 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
         cleaned_text = response.text.strip()
         cleaned_text = cleaned_text.replace("```json", "").replace("```", "").strip()
 
-        # SAFE JSON Extraction
-        # Find the first "{" and last "}" to safely extract JSON
+        # Extract JSON from response
         start_idx = cleaned_text.find('{')
         end_idx = cleaned_text.rfind('}') + 1
 
@@ -214,15 +264,23 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
 
         try:
             parsed_json = json.loads(json_text)
+
+            # Inject image URLs using Pexels
+            for day in parsed_json.get("mealPlan", {}).get("days", []):
+                for meal in day.get("meals", []):
+                    for item in meal.get("items", []):
+                        item_name = item.get("name", "")
+                        image_url = get_pexels_image_url(item_name, PEXELS_API_KEY)
+                        item["imageUrl"] = image_url
+
             return parsed_json
+
         except json.JSONDecodeError as e:
-            return {
-                "error": f"JSON decode failed: {str(e)}",
-                "raw": json_text
-            }
+            return {"error": f"JSON decode failed: {str(e)}", "raw": json_text}
 
     except Exception as e:
         return {"error": f"Unhandled exception: {str(e)}"}
+
 @app.post("/get-meal")
 async def get_meal(user_data: UserData):
     """API endpoint to get meal suggestion based on user mood, location, weather, and budget."""
