@@ -82,7 +82,7 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
             prompt += f"Additional notes from me: {user_data['notes']}. "
 
         prompt += (
-            "Please provide a personalized 5-day meal plan tailored to my location, supporting my health goals and dietary restrictions. "
+            "Please provide a personalized 7-day meal plan tailored to my location, supporting my health goals and dietary restrictions. "
             "The meals should consider the current weather, be nutritious, and reflect local tastes. Each day should include 3 meals "
             "(Breakfast, Lunch, and Dinner), using locally sourced ingredients where possible. Each meal should list multiple food items. "
             "Each item should include a 'name'. Do not include any imageUrl or external links. "

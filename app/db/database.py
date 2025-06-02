@@ -28,3 +28,27 @@ def create_user_table_if_not_exists():
     finally:
         cursor.close()
         conn.close()
+
+def create_waitlist_table_if_not_exists():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS waitlist_users (
+                id SERIAL PRIMARY KEY,
+                first_name VARCHAR(100) NOT NULL,
+                last_name VARCHAR(100),
+                mobile VARCHAR(20),
+                email VARCHAR(100),
+                objectives TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        conn.commit()
+    except Exception as e:
+        print(f"Error creating waitlist_users table: {e}")
+        conn.rollback()
+    finally:
+        cursor.close()
+        conn.close()

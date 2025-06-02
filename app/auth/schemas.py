@@ -10,3 +10,10 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     identifier: str  # email or phone
     password: str
+
+class WaitlistUser(BaseModel):
+    first_name: str
+    last_name: Optional[str] = None
+    mobile: Optional[str] = None
+    email: Optional[EmailStr] = None
+    objectives: Optional[str] = None
