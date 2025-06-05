@@ -119,6 +119,11 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
                     image_url = get_pexels_image_url(item_name)
                     item["imageUrl"] = image_url
 
+        parsed_json["mealPlan"]["location"] = user_data.get("location", "")
+        parsed_json["mealPlan"]["weather"] = weather_data.get("condition", "")
+        parsed_json["mealPlan"]["healthGoals"] = user_data.get("health_goals", "")
+        parsed_json["mealPlan"]["diet"] = user_data.get("dietary_restrictions", "")
+        
         return parsed_json
 
     except Exception as e:
