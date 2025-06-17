@@ -85,7 +85,8 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
             "Please provide a personalized 7-day meal plan tailored to my location, supporting my health goals and dietary restrictions. "
             "The meals should consider the current weather, be nutritious, and reflect local tastes. Each day should include 3 meals "
             "(Breakfast, Lunch, and Dinner), using locally sourced ingredients where possible. Each meal should list multiple food items. "
-            "Each item should include a 'name'. Do not include any imageUrl or external links. "
+            "Each item should include a 'name' and an 'ingredients' field (as a list of ingredient names). "
+            "Do not include any imageUrl or external links. "
             "Include a short 'notes' field per meal. Ensure meals are easy to prepare and budget-friendly. "
             "Format the response strictly as a JSON object using this structure: {...}"
         )
@@ -118,6 +119,7 @@ def get_meal_suggestions_from_genai(user_data: dict, weather_data: dict):
                     item_name = item.get("name", "")
                     image_url = get_pexels_image_url(item_name)
                     item["imageUrl"] = image_url
+                    # 'ingredients' field will be included in the response if Gemini follows the prompt
 
         parsed_json["mealPlan"]["location"] = user_data.get("location", "")
         parsed_json["mealPlan"]["weather"] = weather_data.get("condition", "")
